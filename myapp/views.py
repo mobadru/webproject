@@ -70,13 +70,12 @@ manage_property = generic_api(Property, PropertySerializer)
 manage_booking = generic_api(Booking, BookingSerializer)
 
 
-# Login View for Authentication
+
 class LoginView(APIView):
     def post(self, request, *args, **kwargs):
         username = request.data.get('username')
         password = request.data.get('password')
 
-        # Check if the tenants exists
         try:
             tenant = Tenant.objects.get(username=username, password=password)
             return Response({
