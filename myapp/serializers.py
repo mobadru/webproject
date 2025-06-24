@@ -20,7 +20,9 @@ class RentPaymentSerializer(serializers.ModelSerializer):
 class MaintenanceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Maintenance
-        fields = '__all__'  
+        fields = '__all__'
+        read_only_fields = ['tenant']
+ 
 class BookingSerializer(serializers.ModelSerializer):
     class Meta:
         model = Booking

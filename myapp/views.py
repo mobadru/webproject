@@ -15,23 +15,20 @@ from .serializers import (
     MaintenanceSerializer,
 )
 
-# Generic API with user filtering and proper POST user assignment
+# Generic API with user filtering and automatic tenant assignment
 def generic_api(model_class, serializer_class, user_filter_field=None):
     @api_view(['GET', 'POST', 'PUT', 'DELETE'])
     @permission_classes([IsAuthenticated])
     def api(request, id=None):
         filter_kwargs = {}
 
-        # Fix: If filtering by tenant, get Tenant instance for request.user
-        if user_filter_field:
-            if user_filter_field == 'tenant':
-                try:
-                    tenant = Tenant.objects.get(user=request.user)
-                    filter_kwargs['tenant'] = tenant
-                except Tenant.DoesNotExist:
-                    return Response({'message': 'Tenant profile not found for user'}, status=404)
-            else:
-                filter_kwargs[user_filter_field] = request.user
+        # For tenant filtering, get tenant instance from logged in user
+        if user_filter_field == 'tenant':
+            try:
+                tenant = Tenant.objects.get(user=request.user)
+                filter_kwargs['tenant'] = tenant
+            except Tenant.DoesNotExist:
+                return Response({'message': 'Tenant profile not found for user'}, status=404)
 
         if request.method == 'GET':
             if id:
@@ -55,15 +52,11 @@ def generic_api(model_class, serializer_class, user_filter_field=None):
         elif request.method == 'POST':
             serializer = serializer_class(data=request.data)
             if serializer.is_valid():
-                if user_filter_field:
-                    if user_filter_field == 'tenant':
-                        try:
-                            tenant = Tenant.objects.get(user=request.user)
-                            serializer.save(tenant=tenant)
-                        except Tenant.DoesNotExist:
-                            return Response({'message': 'Tenant profile not found for user'}, status=404)
-                    else:
-                        serializer.save(**{user_filter_field: request.user})
+                if user_filter_field == 'tenant':
+                    # Save with tenant from user, ignoring tenant in request.data
+                    serializer.save(tenant=tenant)
+                elif user_filter_field:
+                    serializer.save(**{user_filter_field: request.user})
                 else:
                     serializer.save()
                 return Response(serializer.data, status=201)
@@ -103,7 +96,7 @@ def generic_api(model_class, serializer_class, user_filter_field=None):
     return api
 
 
-# Tenant registration - create both User and Tenant
+# Tenant registration - creates User and Tenant profiles
 class TenantRegisterView(APIView):
     permission_classes = [AllowAny]
 
@@ -123,14 +116,12 @@ class TenantRegisterView(APIView):
         if User.objects.filter(email=email).exists():
             return Response({'message': 'Email already registered'}, status=400)
 
-        # Create User
         user = User.objects.create(
             username=username,
             email=email,
-            password=make_password(password)  # hash password
+            password=make_password(password)
         )
 
-        # Create Tenant linked to User
         tenant = Tenant.objects.create(
             user=user,
             name=name,
@@ -142,6 +133,7 @@ class TenantRegisterView(APIView):
         return Response(serializer.data, status=201)
 
 
+# Login view to get JWT tokens
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -163,17 +155,7 @@ class LoginView(APIView):
             return Response({'message': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def booking_list(request):
-    # Example protected booking API
-    bookings = [
-        # Dummy example data, replace with your actual queryset & serializer
-        {"id": 1, "property": 101, "start_date": "2025-06-23", "end_date": "2025-06-25", "price": "500", "status": "pending"},
-        {"id": 2, "property": 102, "start_date": "2025-07-01", "end_date": "2025-07-05", "price": "1000", "status": "paid"},
-    ]
-    return Response(bookings)
-
+# Example dashboard counts for tenant or admin
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_dashboard_counts(request):
@@ -197,9 +179,9 @@ def get_dashboard_counts(request):
     return Response(counts)
 
 
-# Your generic APIs (apply user_filter_field as needed)
+# Generic APIs with tenant filtering where relevant
 manage_rentpayment = generic_api(RentPayment, RentPaymentSerializer, user_filter_field='tenant')
 manage_maintenance = generic_api(Maintenance, MaintenanceSerializer, user_filter_field='tenant')
 manage_tenant = generic_api(Tenant, TenantSerializer, user_filter_field='user')
-manage_property = generic_api(Property, PropertySerializer)  # No user filter (admin)
+manage_property = generic_api(Property, PropertySerializer)  # No user filter for properties (admin or public)
 manage_booking = generic_api(Booking, BookingSerializer, user_filter_field='tenant')
