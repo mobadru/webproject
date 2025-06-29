@@ -14,15 +14,15 @@ from .serializers import (
     RentPaymentSerializer,
     MaintenanceSerializer,
 )
+from datetime import datetime
 
-# Generic API with user filtering and automatic tenant assignment
+
 def generic_api(model_class, serializer_class, user_filter_field=None):
     @api_view(['GET', 'POST', 'PUT', 'DELETE'])
     @permission_classes([IsAuthenticated])
     def api(request, id=None):
         filter_kwargs = {}
 
-        # For tenant filtering, get tenant instance from logged in user
         if user_filter_field == 'tenant':
             try:
                 tenant = Tenant.objects.get(user=request.user)
@@ -53,7 +53,6 @@ def generic_api(model_class, serializer_class, user_filter_field=None):
             serializer = serializer_class(data=request.data)
             if serializer.is_valid():
                 if user_filter_field == 'tenant':
-                    # Save with tenant from user, ignoring tenant in request.data
                     serializer.save(tenant=tenant)
                 elif user_filter_field:
                     serializer.save(**{user_filter_field: request.user})
@@ -70,8 +69,28 @@ def generic_api(model_class, serializer_class, user_filter_field=None):
                     instance = model_class.objects.get(id=id, **filter_kwargs)
                 else:
                     instance = model_class.objects.get(id=id)
+
                 serializer = serializer_class(instance, data=request.data)
                 if serializer.is_valid():
+                    # Custom logic to recalculate price for Booking
+                    if model_class == Booking:
+                        start = request.data.get("start_date")
+                        end = request.data.get("end_date")
+                        if start and end:
+                            start_date = datetime.strptime(start, "%Y-%m-%d")
+                            end_date = datetime.strptime(end, "%Y-%m-%d")
+                            months = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month) + 1
+                            months = max(months, 1)
+
+                            prop = instance.property
+                            price_per_month = prop.price
+                            if prop.type.lower() == "single":
+                                price_per_month = 70000
+                            elif prop.type.lower() == "master":
+                                price_per_month = 100000
+
+                            instance.price = months * price_per_month
+
                     serializer.save()
                     return Response(serializer.data)
                 return Response(serializer.errors, status=400)
@@ -96,7 +115,6 @@ def generic_api(model_class, serializer_class, user_filter_field=None):
     return api
 
 
-# Tenant registration - creates User and Tenant profiles
 class TenantRegisterView(APIView):
     permission_classes = [AllowAny]
 
@@ -133,7 +151,6 @@ class TenantRegisterView(APIView):
         return Response(serializer.data, status=201)
 
 
-# Login view to get JWT tokens
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -155,7 +172,6 @@ class LoginView(APIView):
             return Response({'message': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# Example dashboard counts for tenant or admin
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_dashboard_counts(request):
@@ -179,9 +195,8 @@ def get_dashboard_counts(request):
     return Response(counts)
 
 
-# Generic APIs with tenant filtering where relevant
 manage_rentpayment = generic_api(RentPayment, RentPaymentSerializer, user_filter_field='tenant')
 manage_maintenance = generic_api(Maintenance, MaintenanceSerializer, user_filter_field='tenant')
 manage_tenant = generic_api(Tenant, TenantSerializer, user_filter_field='user')
-manage_property = generic_api(Property, PropertySerializer)  # No user filter for properties (admin or public)
+manage_property = generic_api(Property, PropertySerializer)
 manage_booking = generic_api(Booking, BookingSerializer, user_filter_field='tenant')
